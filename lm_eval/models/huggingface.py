@@ -23,6 +23,8 @@ from transformers.models.auto.modeling_auto import (
     MODEL_FOR_SEQ_TO_SEQ_CAUSAL_LM_MAPPING_NAMES,
 )
 
+from MoD import AutoMoDModelForCausalLM
+
 from lm_eval import utils
 from lm_eval.api.instance import Instance
 from lm_eval.api.model import TemplateLM
@@ -505,6 +507,9 @@ class HFLM(TemplateLM):
         please consider subclassing HFLM and overriding this and other methods as needed.
         """
 
+        if "mod" in pretrained:
+            self.AUTO_MODEL_CLASS = AutoMoDModelForCausalLM
+
         model_kwargs = kwargs if kwargs else {}
 
         if parallelize:
@@ -724,7 +729,7 @@ class HFLM(TemplateLM):
 
         # by default for CausalLM - false or self.add_bos_token is set
         if add_special_tokens is None:
-            if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
+            if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM or self.AUTO_MODEL_CLASS == AutoMoDModelForCausalLM:
                 special_tokens_kwargs = {
                     "add_special_tokens": False or self.add_bos_token
                 }
@@ -752,7 +757,7 @@ class HFLM(TemplateLM):
         self.tokenizer.padding_side = padding_side
 
         add_special_tokens = {}
-        if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
+        if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM or self.AUTO_MODEL_CLASS == AutoMoDModelForCausalLM:
             add_special_tokens = {"add_special_tokens": False or self.add_bos_token}
 
         encoding = self.tokenizer(
@@ -797,7 +802,7 @@ class HFLM(TemplateLM):
                     input_ids=inps, attention_mask=attn_mask, labels=labels
                 ).logits
             else:
-                assert self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM
+                assert self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM or self.AUTO_MODEL_CLASS == AutoMoDModelForCausalLM
                 return self.model(inps).logits
 
     def _model_generate(self, context, max_length, stop, **generation_kwargs):
@@ -830,7 +835,7 @@ class HFLM(TemplateLM):
     def _select_cont_toks(
         self, logits: torch.Tensor, contlen: int = None, inplen: int = None
     ) -> torch.Tensor:
-        if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
+        if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM or self.AUTO_MODEL_CLASS == AutoMoDModelForCausalLM:
             assert (
                 contlen and inplen
             ), "Must pass input len and cont. len to select scored logits for causal LM"
@@ -957,7 +962,7 @@ class HFLM(TemplateLM):
             requests,
             sort_fn=_collate,
             group_by="contexts"
-            if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM
+            if (self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM or self.AUTO_MODEL_CLASS == AutoMoDModelForCausalLM)
             and self.logits_cache
             else None,
             group_fn=_lookup_one_token_cont,
@@ -1015,7 +1020,7 @@ class HFLM(TemplateLM):
                 # cont_toks      4 5 6 7 8 9      [:, -len(continuation_enc):, :self.vocab_size] slice
 
                 # when too long to fit in context, truncate from the left
-                if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
+                if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM or self.AUTO_MODEL_CLASS == AutoMoDModelForCausalLM:
                     inp = torch.tensor(
                         (context_enc + continuation_enc)[-(self.max_length + 1) :][:-1],
                         dtype=torch.long,
@@ -1062,7 +1067,7 @@ class HFLM(TemplateLM):
 
             # create encoder attn mask and batched conts, if seq2seq
             call_kwargs = {}
-            if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
+            if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM or self.AUTO_MODEL_CLASS == AutoMoDModelForCausalLM:
                 batched_inps = pad_and_concat(
                     padding_len_inp, inps, padding_side="right"
                 )  # [batch, padding_len_inp]
@@ -1097,7 +1102,7 @@ class HFLM(TemplateLM):
                 # from prompt/prefix tuning tokens, if applicable
                 ctx_len = (
                     inplen + (logits.shape[0] - padding_len_inp)
-                    if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM
+                    if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM or self.AUTO_MODEL_CLASS == AutoMoDModelForCausalLM
                     else None
                 )
                 logits = self._select_cont_toks(logits, contlen=contlen, inplen=ctx_len)
@@ -1226,7 +1231,7 @@ class HFLM(TemplateLM):
                 max_gen_toks = self.max_gen_toks
 
             # set the max length in tokens of inputs ("context_enc")
-            if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
+            if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM or self.AUTO_MODEL_CLASS == AutoMoDModelForCausalLM:
                 # max len for inputs = max length, minus room to generate the max new tokens
                 max_ctx_len = self.max_length - max_gen_toks
             elif self.AUTO_MODEL_CLASS == transformers.AutoModelForSeq2SeqLM:
@@ -1256,7 +1261,7 @@ class HFLM(TemplateLM):
             cont_toks_list = cont.tolist()
             for cont_toks, context in zip(cont_toks_list, contexts):
                 # discard context + left-padding toks if using causal decoder-only LM
-                if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
+                if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM or self.AUTO_MODEL_CLASS == AutoMoDModelForCausalLM:
                     cont_toks = cont_toks[context_enc.shape[1] :]
 
                 s = self.tok_decode(cont_toks)
